@@ -47,7 +47,7 @@ Config via env vars (all optional — see `.env.example`):
 npm test             # jest, run in-band
 ```
 
-55 tests across the store, URL validation, title extraction, and the HTTP API. Coverage thresholds
+60 tests across the store, URL validation, title extraction, and the HTTP API. Coverage thresholds
 are enforced at 80% (statements/lines/functions/branches) in `package.json`.
 
 ## API
