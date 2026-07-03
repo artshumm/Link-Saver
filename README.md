@@ -117,7 +117,9 @@ The 2–3 prompts that did the most work:
    SSRF IP classifier and the `<title>` extractor (entities, uppercase, no-title fallback)."*
 3. *"Review this hand-written `server.js` as a code review. Find the destructive bugs first, explain
    what input breaks each and rank by severity, then give corrected code that stays faithful to the
-   Express-plus-JSON-file design."* (Part B / `REVIEW.md`.)
+   Express-plus-JSON-file design."* (Part B / [`REVIEW.md`](REVIEW.md) — see
+   [Known limitations of the corrected snippet](REVIEW.md#known-limitations-of-the-corrected-snippet)
+   for what the JSON-file fix deliberately leaves to this SQLite app.)
 
 ## If I could have asked you questions first
 
