@@ -1,0 +1,18 @@
+node_modules/
+*.log
+.env
+.env.local
+
+# Runtime data (SQLite DB + WAL files)
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+links.json
+
+# Test artifacts
+coverage/
+
+# Local AI tooling / task brief (not part of the deliverable)
+.claude/
+*.pdf
