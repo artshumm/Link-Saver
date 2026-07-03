@@ -144,6 +144,13 @@ a temp file and `rename` for atomicity.
 Kept faithful to the snippet's design (Express + a JSON file) so the diff is reviewable, while
 fixing the real bugs. (The actual app in this repo uses SQLite — see the README.)
 
+> **A note on the fix for the concurrency bug.** Serializing only the *write* is not enough: two
+> concurrent POSTs can both `loadLinks()` the same stale array, each push their own link, and the
+> second write clobbers the first (one link silently lost). The unit that must be serialized is the
+> whole **load → modify → persist** cycle. Below, every mutation runs through a single `mutate()`
+> queue, so reads always see the previous mutation's result. Errors reject the caller's promise but
+> do **not** poison the queue for later requests.
+
 ```js
 const express = require('express');
 const fs = require('fs/promises');
@@ -152,9 +159,7 @@ app.use(express.json());
 
 const DB_FILE = 'links.json';
 const FETCH_TIMEOUT_MS = 5000;
-
-// A single in-flight write chain avoids interleaved read-modify-write races.
-let writeChain = Promise.resolve();
+const MAX_HTML_BYTES = 512 * 1024; // cap the response we read (DoS guard)
 
 async function loadLinks() {
   try {
@@ -165,20 +170,36 @@ async function loadLinks() {
   }
 }
 
-function persist(links) {
-  // Serialize writes; write to a temp file then rename for atomicity.
-  writeChain = writeChain.then(async () => {
-    const tmp = `${DB_FILE}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(links, null, 2));
-    await fs.rename(tmp, DB_FILE);
-  });
-  return writeChain;
+async function persist(links) {
+  // Write to a temp file then rename for atomicity (a crash can't leave a half file).
+  const tmp = `${DB_FILE}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(links, null, 2));
+  await fs.rename(tmp, DB_FILE);
 }
+
+// Serialize the FULL load-modify-write so concurrent requests can't lose each other's writes.
+// The tail is only advanced past errors, so one failed mutation doesn't poison the queue.
+let mutationQueue = Promise.resolve();
+function mutate(mutator) {
+  const run = mutationQueue.then(async () => {
+    const links = await loadLinks();
+    const result = await mutator(links); // may return { links, value } to persist + return
+    if (result && result.links) await persist(result.links);
+    return result ? result.value : undefined;
+  });
+  mutationQueue = run.catch(() => {}); // keep the chain alive after failures
+  return run; // caller still sees the real error
+}
+
+const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
 
 function extractTitle(html, fallback) {
   const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   if (!m) return fallback;
-  const title = m[1].replace(/\s+/g, ' ').trim();
+  const title = m[1]
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/&(amp|lt|gt|quot|#39);/g, (e) => ENTITIES[e]);
   return title || fallback;
 }
 
@@ -187,7 +208,8 @@ async function fetchTitle(url) {
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: controller.signal });
-    const html = await res.text();
+    const buf = await res.arrayBuffer(); // read once
+    const html = Buffer.from(buf).slice(0, MAX_HTML_BYTES).toString('utf8');
     return extractTitle(html, new URL(url).hostname);
   } finally {
     clearTimeout(timer);
@@ -214,28 +236,50 @@ app.post('/links', async (req, res) => {
     return res.status(502).json({ error: `Could not fetch page: ${err.message}` });
   }
 
-  const links = await loadLinks();
   const link = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, // collision-resistant
     url: parsed.href,
     title,
     savedAt: new Date().toISOString(), // stable string type
   };
-  links.push(link);
-  await persist(links);
+
+  try {
+    await mutate((links) => ({ links: [...links, link], value: link }));
+  } catch {
+    return res.status(500).json({ error: 'Could not save link' });
+  }
 
   res.status(201).json(link);
 });
 
 app.delete('/links/:id', async (req, res) => {
-  const links = await loadLinks();
-  const next = links.filter((l) => String(l.id) !== req.params.id); // keep non-matching
-  if (next.length === links.length) {
-    return res.status(404).json({ error: 'Link not found' });
+  let removed;
+  try {
+    removed = await mutate((links) => {
+      const next = links.filter((l) => String(l.id) !== req.params.id); // keep non-matching
+      return { links: next, value: next.length !== links.length };
+    });
+  } catch {
+    return res.status(500).json({ error: 'Could not delete link' });
   }
-  await persist(next);
+
+  if (!removed) return res.status(404).json({ error: 'Link not found' });
   res.sendStatus(204);
 });
 
 app.listen(3000);
 ```
+
+## Known limitations of the corrected snippet
+
+To keep the fix scoped to the reported bugs (and reviewable against the original), a couple of
+production concerns are called out rather than fully solved here — the SQLite app in this repo
+addresses them:
+
+- **SSRF.** `fetch(url)` still lets a caller point the server at internal hosts
+  (`http://169.254.169.254/`, `http://localhost:…`). A hardened version resolves the host and
+  rejects private/loopback/link-local addresses before connecting. The main app does this in
+  `lib/fetchTitle.js`.
+- **Persistence model.** A rewrite-the-whole-file JSON store is fine for a small take-home but
+  won't scale (whole-file writes, no indexing, coarse-grained serialization). The real app uses
+  SQLite with parameterized statements.
