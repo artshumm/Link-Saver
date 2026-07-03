@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Link Saver</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <h1 class="app__title">Link Saver</h1>
+        <p class="app__subtitle">Paste a URL — the title is fetched for you.</p>
+      </header>
+
+      <form id="save-form" class="save-form" novalidate>
+        <label class="sr-only" for="url-input">URL to save</label>
+        <input
+          id="url-input"
+          class="save-form__input"
+          name="url"
+          type="url"
+          inputmode="url"
+          placeholder="https://example.com/article"
+          autocomplete="off"
+          required
+        />
+        <button id="save-button" class="save-form__button" type="submit">Save</button>
+      </form>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section class="links" aria-labelledby="links-heading">
+        <div class="links__toolbar">
+          <h2 id="links-heading" class="links__heading">Saved links</h2>
+          <label class="filter">
+            <input id="filter-favourites" type="checkbox" />
+            <span>Favourites only</span>
+          </label>
+        </div>
+
+        <ul id="links-list" class="links__list" aria-live="polite"></ul>
+        <p id="empty-state" class="links__empty" hidden>No links yet. Save one above.</p>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
